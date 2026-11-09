@@ -8,7 +8,7 @@ import com.dracolich777.clover.util.Text;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.handling.IPayloadContext;
 
-/** Every handler treats the client as untrusted: RequestService re-validates everything. */
+/** Every handler treats the client as untrusted: the services re-validate everything. */
 public final class ServerHandlers {
 
   private ServerHandlers() {}
@@ -16,7 +16,6 @@ public final class ServerHandlers {
   public static void onRequest(RequestPayload p, IPayloadContext ctx) {
     if (!(ctx.player() instanceof ServerPlayer sp)) return;
     Safe.run("request packet", sp, () -> {
-      // staff check, catalog, allowed group, duration cap, reason rules, cooldown: all in submit()
       RequestService.submit(sp, p.node(), p.duration(), p.reason());
       GuiService.resend(sp);
     });
@@ -26,7 +25,6 @@ public final class ServerHandlers {
     if (!(ctx.player() instanceof ServerPlayer sp)) return;
     Safe.run("decision packet", sp, () -> {
       if (!RequestService.isAdmin(sp)) {
-        // re-checked on every packet
         sp.sendSystemMessage(Text.msg(Config.MSG_NOT_ALLOWED));
         return;
       }
@@ -51,6 +49,14 @@ public final class ServerHandlers {
       }
       GuiService.resend(sp);
     });
+  }
+
+  public static void onSearch(SearchPayload p, IPayloadContext ctx) {
+    if (ctx.player() instanceof ServerPlayer sp) Safe.run(
+      "search packet",
+      sp,
+      () -> GuiService.search(sp, p.query())
+    );
   }
 
   public static void onClose(ClosePayload p, IPayloadContext ctx) {

@@ -4,6 +4,7 @@ import com.dracolich777.clover.net.DecisionPayload;
 import com.dracolich777.clover.net.SyncPayload;
 import com.dracolich777.clover.net.SyncPayload.PendingDto;
 import com.dracolich777.clover.util.Durations;
+import com.dracolich777.clover.util.NodeNames;
 import com.dracolich777.clover.util.Text;
 import java.time.Duration;
 import java.util.List;
@@ -24,7 +25,8 @@ public final class AdminScreen extends CloverScreen {
       SyncPayload.MODE_ADMIN,
       Component.literal(
         "Optional note for the player (sent with Accept / Deny)"
-      )
+      ),
+      null
     );
     this.pending = p.pending();
   }
@@ -54,7 +56,7 @@ public final class AdminScreen extends CloverScreen {
     PendingDto r = pending.get(index);
     String dur = Durations.format(Duration.ofSeconds(r.durationSeconds()));
 
-    addRenderableWidget(
+    StringWidget line1 = addRenderableWidget(
       new StringWidget(
         x,
         y,
@@ -64,7 +66,7 @@ public final class AdminScreen extends CloverScreen {
           "&e" +
             r.playerName() +
             " &7-> &f" +
-            r.node() +
+            NodeNames.friendly(r.node()) +
             " &8(" +
             dur +
             ") &6[" +
@@ -74,6 +76,7 @@ public final class AdminScreen extends CloverScreen {
         font
       ).alignLeft()
     );
+    line1.setTooltip(Tooltip.create(Text.color("&7" + r.node())));
 
     String reasonText = r.reason().isEmpty() ? "(no reason given)" : r.reason();
     StringWidget reason = addRenderableWidget(

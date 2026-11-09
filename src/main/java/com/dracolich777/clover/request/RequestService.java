@@ -25,9 +25,14 @@ public final class RequestService {
 
   private RequestService() {}
 
+  public static boolean isStaff(ServerPlayer p) {
+    PermissionBackend b = Backends.get();
+    return b != null && b.hasPermission(p, PermissionBackend.REQUEST_PERMISSION);
+  }
+
   public static boolean isAdmin(ServerPlayer p) {
     PermissionBackend b = Backends.get();
-    return b != null && b.hasPermission(p, Config.ADMIN_PERMISSION.get());
+    return b != null && b.hasPermission(p, PermissionBackend.ADMIN_PERMISSION);
   }
 
   /** Strips control characters and the section sign, collapses whitespace. */
@@ -83,7 +88,7 @@ public final class RequestService {
       p.sendSystemMessage(Text.msg(Config.MSG_BACKEND_DOWN));
       return false;
     }
-    if (!b.isStaff(p, Config.STAFF_GROUPS.get())) {
+    if (!isStaff(p)) {
       p.sendSystemMessage(Text.msg(Config.MSG_NOT_STAFF));
       return false;
     }
@@ -182,7 +187,7 @@ public final class RequestService {
         !Config.ALLOW_SELF_APPROVAL.get() && a.getUUID().equals(r.player())
       ) continue;
       if (
-        b.hasPermission(a, Config.ADMIN_PERMISSION.get())
+        b.hasPermission(a, PermissionBackend.ADMIN_PERMISSION)
       ) a.sendSystemMessage(line);
     }
   }

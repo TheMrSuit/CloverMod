@@ -8,7 +8,7 @@ public final class Net {
   private Net() {}
 
   public static void register(RegisterPayloadHandlersEvent e) {
-    // optional(): vanilla / un-modded clients can still connect; they just don't get the /clover menu.
+ 
     PayloadRegistrar r = e.registrar("1").optional();
     r.playToClient(SyncPayload.TYPE, SyncPayload.CODEC, ClientHandlers::onSync);
     r.playToServer(
@@ -20,6 +20,11 @@ public final class Net {
       DecisionPayload.TYPE,
       DecisionPayload.CODEC,
       ServerHandlers::onDecision
+    );
+    r.playToServer(
+      SearchPayload.TYPE,
+      SearchPayload.CODEC,
+      ServerHandlers::onSearch
     );
     r.playToServer(
       ClosePayload.TYPE,

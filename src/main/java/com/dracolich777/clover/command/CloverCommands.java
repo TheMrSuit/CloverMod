@@ -1,15 +1,18 @@
 package com.dracolich777.clover.command;
 
 import com.dracolich777.clover.Config;
+import com.dracolich777.clover.ConfigService;
 import com.dracolich777.clover.backend.Backends;
 import com.dracolich777.clover.backend.PermissionBackend;
 import com.dracolich777.clover.catalog.CatalogEntry;
 import com.dracolich777.clover.catalog.CatalogManager;
 import com.dracolich777.clover.clover;
+import com.dracolich777.clover.discord.Discord;
 import com.dracolich777.clover.gui.GuiService;
 import com.dracolich777.clover.request.PermissionRequest;
 import com.dracolich777.clover.request.RequestManager;
 import com.dracolich777.clover.request.RequestService;
+import com.dracolich777.clover.util.Compat;
 import com.dracolich777.clover.util.Durations;
 import com.dracolich777.clover.util.Safe;
 import com.dracolich777.clover.util.Text;
@@ -20,7 +23,9 @@ import com.mojang.brigadier.context.CommandContext;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
 import com.mojang.brigadier.suggestion.SuggestionProvider;
 import com.mojang.brigadier.suggestion.SuggestionsBuilder;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 import net.minecraft.commands.CommandSourceStack;
@@ -28,6 +33,7 @@ import net.minecraft.commands.Commands;
 import net.minecraft.commands.SharedSuggestionProvider;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
+import net.neoforged.neoforge.common.ModConfigSpec;
 
 public final class CloverCommands {
 
@@ -36,7 +42,7 @@ public final class CloverCommands {
   public static void register(CommandDispatcher<CommandSourceStack> d) {
     d.register(requestRoot()); // /rqperm  (text only)
     d.register(adminRoot()); // /acperm  (text only)
-    d.register(cloverRoot()); // /clover  (opens the GUI that fits the player)
+    d.register(cloverRoot()); // /clover  (menu + admin config)
   }
 
   // ------------------------------------------------------------ permission predicates
@@ -44,8 +50,7 @@ public final class CloverCommands {
   private static boolean isStaff(CommandSourceStack s) {
     try {
       if (!(s.getEntity() instanceof ServerPlayer p)) return false;
-      PermissionBackend b = Backends.get();
-      return b != null && b.isStaff(p, Config.STAFF_GROUPS.get());
+      return RequestService.isStaff(p);
     } catch (Exception | LinkageError e) {
       return false;
     }
@@ -63,6 +68,12 @@ public final class CloverCommands {
     }
   }
 
+  private static boolean visible(ServerPlayer p, CatalogEntry e) {
+    if (e.allowedGroups.isEmpty()) return true;
+    PermissionBackend b = Backends.get();
+    return b != null && b.isStaff(p, e.allowedGroups);
+  }
+
   // ------------------------------------------------------------ suggestions
 
   /** One greedy argument: "<permission> <duration> <reason...>". Suggest per position. */
@@ -76,21 +87,19 @@ public final class CloverCommands {
       String rem = b.getRemaining();
       int sp = rem.indexOf(' ');
       if (sp < 0) {
-        return SharedSuggestionProvider.suggest(
-          CatalogManager.visibleTo(p)
-            .stream()
-            .map(e -> e.node),
-          b
-        );
+        // typing the permission: best 50 matches, with the plain name as the tooltip
+        for (CatalogEntry e : CatalogManager.search(p, rem, 50).entries()) {
+          b.suggest(e.node, Component.literal(Text.strip(e.title())));
+        }
+        return b.buildFuture();
       }
       String node = rem.substring(0, sp);
       if (rem.indexOf(' ', sp + 1) < 0) {
         // typing the duration
-        for (CatalogEntry e : CatalogManager.visibleTo(p)) {
-          if (e.node.equalsIgnoreCase(node)) {
-            SuggestionsBuilder at = b.createOffset(b.getStart() + sp + 1);
-            return SharedSuggestionProvider.suggest(e.durations, at);
-          }
+        CatalogEntry e = CatalogManager.get(node);
+        if (e != null && visible(p, e)) {
+          SuggestionsBuilder at = b.createOffset(b.getStart() + sp + 1);
+          return SharedSuggestionProvider.suggest(e.durations, at);
         }
       }
     } catch (Exception | LinkageError e) {
@@ -126,6 +135,47 @@ public final class CloverCommands {
     return b.buildFuture();
   };
 
+  private static final SuggestionProvider<CommandSourceStack> CONFIG_KEYS = (
+    c,
+    b
+  ) -> SharedSuggestionProvider.suggest(Config.keys().keySet(), b);
+
+  private static final SuggestionProvider<CommandSourceStack> CONFIG_SECTIONS =
+    (c, b) -> {
+      Set<String> sections = new HashSet<>();
+      for (String path : Config.keys().keySet()) {
+        int dot = path.indexOf('.');
+        if (dot > 0) sections.add(path.substring(0, dot));
+      }
+      return SharedSuggestionProvider.suggest(sections, b);
+    };
+
+  private static final SuggestionProvider<CommandSourceStack> CONFIG_VALUES = (
+    c,
+    b
+  ) -> {
+    try {
+      Config.Key k = Config.keys().get(StringArgumentType.getString(c, "key"));
+      if (k != null && !k.secret()) {
+        if (k.value() instanceof ModConfigSpec.BooleanValue) {
+          return SharedSuggestionProvider.suggest(List.of("true", "false"), b);
+        }
+        if (k.value() instanceof ModConfigSpec.EnumValue<?> ev) {
+          for (Object o : (
+            (Enum<?>) ev.getDefault()
+          ).getDeclaringClass().getEnumConstants())
+            b.suggest(o.toString());
+        } else {
+          String cur = ConfigService.display(k);
+          if (cur.length() < 60) b.suggest(cur);
+        }
+      }
+    } catch (Exception | LinkageError e) {
+      clover.LOGGER.debug("[Clover] suggestion failed", e);
+    }
+    return b.buildFuture();
+  };
+
   // ------------------------------------------------------------ /rqperm
 
   private static LiteralArgumentBuilder<CommandSourceStack> requestRoot() {
@@ -137,32 +187,28 @@ public final class CloverCommands {
       })
       .then(
         Commands.literal("list")
-          .requires(CloverCommands::isStaff)
+          .requires(s -> isStaff(s) || isAdmin(s))
           .executes(c ->
-            Safe.cmd(c, "list permissions", () -> {
-              ServerPlayer p = c.getSource().getPlayerOrException();
-              List<CatalogEntry> list = CatalogManager.visibleTo(p);
-              if (list.isEmpty()) {
-                c.getSource().sendFailure(Text.msg(Config.MSG_NONE_AVAILABLE));
-                return 0;
-              }
-              for (CatalogEntry e : list) {
-                String line =
-                  "&f" +
-                  e.node +
-                  " &7(max " +
-                  Durations.format(e.max()) +
-                  ")" +
-                  (e.description.isBlank() ? "" : " &8- &7" + e.description);
-                c.getSource().sendSuccess(() -> Text.color(line), false);
-              }
-              return list.size();
-            })
+            Safe.cmd(c, "list permissions", () -> showResults(c, ""))
+          )
+      )
+      .then(
+        Commands.literal("search")
+          .requires(s -> isStaff(s) || isAdmin(s))
+          .then(
+            Commands.argument(
+              "query",
+              StringArgumentType.greedyString()
+            ).executes(c ->
+              Safe.cmd(c, "search permissions", () ->
+                showResults(c, StringArgumentType.getString(c, "query"))
+              )
+            )
           )
       )
       .then(
         Commands.argument("request", StringArgumentType.greedyString())
-          .requires(CloverCommands::isStaff)
+          .requires(s -> isStaff(s) || isAdmin(s))
           .suggests(REQUEST_SUGGESTIONS)
           .executes(c ->
             Safe.cmd(c, "request", () -> {
@@ -187,6 +233,53 @@ public final class CloverCommands {
       );
   }
 
+  private static int showResults(
+    CommandContext<CommandSourceStack> c,
+    String query
+  ) throws CommandSyntaxException {
+    ServerPlayer p = c.getSource().getPlayerOrException();
+    CatalogManager.SearchResult r = CatalogManager.search(p, query, 10);
+    if (r.entries().isEmpty()) {
+      c.getSource().sendFailure(Text.msg(Config.MSG_NONE_AVAILABLE));
+      return 0;
+    }
+    for (CatalogEntry e : r.entries()) {
+      String node = e.node;
+      c
+        .getSource()
+        .sendSuccess(
+          () ->
+            Text.color(
+              "&f" +
+                e.title() +
+                " &8- &7" +
+                node +
+                " &8(max " +
+                Durations.format(e.max()) +
+                ")"
+            ).withStyle(s -> Compat.suggest(s, "/rqperm " + node + " ")),
+          false
+        ); // click to start a request
+    }
+    if (r.total() > r.entries().size()) {
+      int shown = r.entries().size();
+      c
+        .getSource()
+        .sendSuccess(
+          () ->
+            Text.color(
+              "&7Showing " +
+                shown +
+                " of " +
+                r.total() +
+                ". Narrow it down with &f/rqperm search <text>&7."
+            ),
+          false
+        );
+    }
+    return r.entries().size();
+  }
+
   // ------------------------------------------------------------ /acperm
 
   private static LiteralArgumentBuilder<CommandSourceStack> adminRoot() {
@@ -203,6 +296,19 @@ public final class CloverCommands {
       .then(
         Commands.literal("reload").executes(c ->
           Safe.cmd(c, "reload", () -> reload(c))
+        )
+      )
+      .then(
+        Commands.literal("discord").then(
+          Commands.literal("test").executes(c ->
+            Safe.cmd(c, "discord test", () -> {
+              CommandSourceStack src = c.getSource();
+              Discord.sendTest(src.getServer(), m ->
+                src.sendSuccess(() -> m, false)
+              );
+              return 1;
+            })
+          )
         )
       );
   }
@@ -291,7 +397,7 @@ public final class CloverCommands {
       )
       .then(
         Commands.literal("request")
-          .requires(CloverCommands::isStaff)
+          .requires(s -> isStaff(s) || isAdmin(s))
           .executes(c ->
             Safe.cmd(c, "open request menu", () -> {
               GuiService.openRequest(c.getSource().getPlayerOrException());
@@ -313,11 +419,149 @@ public final class CloverCommands {
         Commands.literal("reload")
           .requires(CloverCommands::isAdmin)
           .executes(c -> Safe.cmd(c, "reload", () -> reload(c)))
+      )
+      .then(
+        Commands.literal("config")
+          .requires(CloverCommands::isAdmin)
+          .executes(c -> {
+            c
+              .getSource()
+              .sendSuccess(
+                () ->
+                  Text.color(
+                    "&7Server config: &f/clover config list [section]&7, " +
+                      "&f/clover config get <key>&7, &f/clover config set <key> <value>"
+                  ),
+                false
+              );
+            return 1;
+          })
+          .then(
+            Commands.literal("list")
+              .executes(c ->
+                Safe.cmd(c, "config list", () -> listConfig(c, ""))
+              )
+              .then(
+                Commands.argument("section", StringArgumentType.word())
+                  .suggests(CONFIG_SECTIONS)
+                  .executes(c ->
+                    Safe.cmd(c, "config list", () ->
+                      listConfig(c, StringArgumentType.getString(c, "section"))
+                    )
+                  )
+              )
+          )
+          .then(
+            Commands.literal("get").then(
+              Commands.argument("key", StringArgumentType.word())
+                .suggests(CONFIG_KEYS)
+                .executes(c ->
+                  Safe.cmd(c, "config get", () -> {
+                    Config.Key k = Config.keys().get(
+                      StringArgumentType.getString(c, "key")
+                    );
+                    if (k == null) {
+                      c
+                        .getSource()
+                        .sendFailure(
+                          Text.color(
+                            "&cUnknown setting. Try /clover config list"
+                          )
+                        );
+                      return 0;
+                    }
+                    c
+                      .getSource()
+                      .sendSuccess(
+                        () ->
+                          Text.color(
+                            "&e" +
+                              k.path() +
+                              " &7= &f" +
+                              Text.esc(ConfigService.display(k))
+                          ),
+                        false
+                      );
+                    return 1;
+                  })
+                )
+            )
+          )
+          .then(
+            Commands.literal("set").then(
+              Commands.argument("key", StringArgumentType.word())
+                .suggests(CONFIG_KEYS)
+                .then(
+                  Commands.argument("value", StringArgumentType.greedyString())
+                    .suggests(CONFIG_VALUES)
+                    .executes(c ->
+                      Safe.cmd(c, "config set", () -> {
+                        String key = StringArgumentType.getString(c, "key");
+                        String value = StringArgumentType.getString(c, "value");
+                        try {
+                          String shown = ConfigService.set(key, value);
+                          c
+                            .getSource()
+                            .sendSuccess(
+                              () ->
+                                Text.color(
+                                  "&aSet &e" +
+                                    key +
+                                    " &ato &f" +
+                                    Text.esc(shown)
+                                ),
+                              false
+                            );
+                          return 1;
+                        } catch (IllegalArgumentException e) {
+                          c
+                            .getSource()
+                            .sendFailure(
+                              Text.color(
+                                "&c" + Text.esc(String.valueOf(e.getMessage()))
+                              )
+                            );
+                          return 0;
+                        }
+                      })
+                    )
+                )
+            )
+          )
       );
   }
 
+  private static int listConfig(
+    CommandContext<CommandSourceStack> c,
+    String prefix
+  ) {
+    int n = 0;
+    for (Config.Key k : Config.keys().values()) {
+      if (!prefix.isEmpty() && !k.path().startsWith(prefix)) continue;
+      if (++n > 40) {
+        c
+          .getSource()
+          .sendSuccess(
+            () -> Text.color("&7...more; narrow it with a section name"),
+            false
+          );
+        break;
+      }
+      c
+        .getSource()
+        .sendSuccess(
+          () ->
+            Text.color(
+              "&e" + k.path() + " &7= &f" + Text.esc(ConfigService.display(k))
+            ),
+          false
+        );
+    }
+    return n;
+  }
+
   private static int reload(CommandContext<CommandSourceStack> c) {
-    int n = CatalogManager.load();
+    int n = ConfigService.apply();
     if (n < 0) {
       c.getSource().sendFailure(Text.msg(Config.MSG_ERROR));
       return 0;

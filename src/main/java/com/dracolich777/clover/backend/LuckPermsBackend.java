@@ -13,8 +13,6 @@ import net.luckperms.api.model.data.TemporaryNodeMergeStrategy;
 import net.luckperms.api.model.group.Group;
 import net.luckperms.api.model.user.User;
 import net.luckperms.api.node.Node;
-import net.luckperms.api.node.NodeType;
-import net.luckperms.api.node.types.PermissionNode;
 import net.luckperms.api.platform.PlayerAdapter;
 import net.minecraft.server.level.ServerPlayer;
 
@@ -33,7 +31,6 @@ public final class LuckPermsBackend implements PermissionBackend {
                 for (String want : groups) if (g.getName().equalsIgnoreCase(want)) return true;
             }
         } catch (IllegalStateException notLoaded) {
-            // user data not loaded yet
         }
         return false;
     }
@@ -57,17 +54,7 @@ public final class LuckPermsBackend implements PermissionBackend {
     }
 
     @Override
-    public long activeRemainingSeconds(ServerPlayer p, String permission) {
-        try {
-            long best = ACTIVE_NONE;
-            for (PermissionNode n : adapter.getUser(p).getNodes(NodeType.PERMISSION)) {
-                if (!n.getValue() || !n.getKey().equalsIgnoreCase(permission) || n.hasExpired()) continue;
-                if (!n.hasExpiry()) return ACTIVE_PERMANENT;
-                best = Math.max(best, n.getExpiryDuration().getSeconds());
-            }
-            return best;
-        } catch (IllegalStateException notLoaded) {
-            return ACTIVE_NONE;
-        }
+    public Collection<String> knownPermissions() {
+        return lp.getPlatform().getKnownPermissions();
     }
 }

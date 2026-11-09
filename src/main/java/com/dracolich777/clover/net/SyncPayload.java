@@ -9,12 +9,13 @@ import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 
-/** Server -> client snapshot, used both to open a screen and for live updates. */
 public record SyncPayload(
   boolean open,
   byte mode,
   List<EntryDto> entries,
-  List<PendingDto> pending
+  List<PendingDto> pending,
+  int total,
+  String query
 ) implements CustomPacketPayload {
   public static final byte MODE_REQUEST = 0,
     MODE_ADMIN = 1;
@@ -22,9 +23,9 @@ public record SyncPayload(
     MAX_PENDING = 300,
     MAX_DURATIONS = 21;
 
-  /** pendingCode is "" when the player has no pending request for this node. */
   public record EntryDto(
     String node,
+    String title,
     String description,
     List<String> durations,
     String pendingCode
@@ -54,6 +55,7 @@ public record SyncPayload(
     b.writeVarInt(entries.size());
     for (EntryDto e : entries) {
       b.writeUtf(e.node(), 128);
+      b.writeUtf(e.title(), 128);
       b.writeUtf(e.description(), 256);
       b.writeVarInt(e.durations().size());
       for (String d : e.durations()) b.writeUtf(d, 32);
@@ -68,6 +70,8 @@ public record SyncPayload(
       b.writeUtf(p.reason(), 512);
       b.writeLong(p.ageSeconds());
     }
+    b.writeVarInt(total);
+    b.writeUtf(query, 64);
   }
 
   private static SyncPayload read(FriendlyByteBuf b) {
@@ -77,11 +81,12 @@ public record SyncPayload(
     List<EntryDto> entries = new ArrayList<>(n);
     for (int i = 0; i < n; i++) {
       String node = b.readUtf(128);
+      String title = b.readUtf(128);
       String desc = b.readUtf(256);
       int dn = checked(b.readVarInt(), MAX_DURATIONS);
       List<String> durs = new ArrayList<>(dn);
       for (int j = 0; j < dn; j++) durs.add(b.readUtf(32));
-      entries.add(new EntryDto(node, desc, durs, b.readUtf(8)));
+      entries.add(new EntryDto(node, title, desc, durs, b.readUtf(8)));
     }
     int m = checked(b.readVarInt(), MAX_PENDING);
     List<PendingDto> pending = new ArrayList<>(m);
@@ -97,7 +102,8 @@ public record SyncPayload(
         )
       );
     }
-    return new SyncPayload(open, mode, entries, pending);
+    int total = Math.max(0, b.readVarInt());
+    return new SyncPayload(open, mode, entries, pending, total, b.readUtf(64));
   }
 
   private static int checked(int n, int max) {
