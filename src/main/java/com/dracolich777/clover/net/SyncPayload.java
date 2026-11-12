@@ -14,11 +14,13 @@ public record SyncPayload(
   byte mode,
   List<EntryDto> entries,
   List<PendingDto> pending,
+  List<TemporaryDto> temporary,
   int total,
   String query
 ) implements CustomPacketPayload {
   public static final byte MODE_REQUEST = 0,
-    MODE_ADMIN = 1;
+    MODE_ADMIN = 1,
+    MODE_INFO = 2;
   public static final int MAX_ENTRIES = 100,
     MAX_PENDING = 300,
     MAX_DURATIONS = 21;
@@ -39,6 +41,8 @@ public record SyncPayload(
     String reason,
     long ageSeconds
   ) {}
+
+  public record TemporaryDto(String node, long expiresAtMs) {}
 
   public static final Type<SyncPayload> TYPE = Compat.payloadType("sync");
   public static final StreamCodec<RegistryFriendlyByteBuf, SyncPayload> CODEC =
@@ -69,6 +73,11 @@ public record SyncPayload(
       b.writeLong(p.durationSeconds());
       b.writeUtf(p.reason(), 512);
       b.writeLong(p.ageSeconds());
+    }
+    b.writeVarInt(temporary.size());
+    for (TemporaryDto t : temporary) {
+      b.writeUtf(t.node(), 128);
+      b.writeLong(t.expiresAtMs());
     }
     b.writeVarInt(total);
     b.writeUtf(query, 64);
@@ -102,8 +111,11 @@ public record SyncPayload(
         )
       );
     }
+    int t = checked(b.readVarInt(), MAX_PENDING);
+    List<TemporaryDto> temporary = new ArrayList<>(t);
+    for (int i = 0; i < t; i++) temporary.add(new TemporaryDto(b.readUtf(128), b.readLong()));
     int total = Math.max(0, b.readVarInt());
-    return new SyncPayload(open, mode, entries, pending, total, b.readUtf(64));
+    return new SyncPayload(open, mode, entries, pending, temporary, total, b.readUtf(64));
   }
 
   private static int checked(int n, int max) {

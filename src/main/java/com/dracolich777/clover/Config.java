@@ -86,6 +86,9 @@ public class Config {
             "Cancel a player's pending requests when they log out (the grant timer starts at approval).");
     public static final ModConfigSpec.BooleanValue NOTIFY_ADMINS = bool("notifyAdmins", "notifyAdmins", true,
             "Tell online admins in chat (with clickable Accept/Deny).");
+    public static final ModConfigSpec.IntValue PERMISSION_EXPIRY_WARNING_SECONDS = num("permissionExpiryWarningSeconds",
+            "permissionExpiryWarningSeconds", 60, 0, 3600,
+            "Warn players this many seconds before a temporary permission expires. 0 disables the warning.");
     public static final ModConfigSpec.IntValue LP_RETRY_ATTEMPTS = num("luckPermsRetryAttempts", "luckPermsRetryAttempts", 3, 0, 10, "");
     public static final ModConfigSpec.IntValue LP_RETRY_DELAY_MS = num("luckPermsRetryDelayMs", "luckPermsRetryDelayMs", 1000, 100, 60000, "");
     public static final ModConfigSpec.DoubleValue MOCK_FAILURE_CHANCE = dec("mockFailureChance", "mockFailureChance", 0.0, 0.0, 1.0,
@@ -108,7 +111,8 @@ public class Config {
             MSG_UNKNOWN_PERMISSION, MSG_INVALID_DURATION, MSG_REASON_REQUIRED, MSG_REASON_TOO_LONG, MSG_COOLDOWN,
             MSG_TOO_MANY, MSG_ADMIN_NOTIFY, MSG_APPROVED_PLAYER, MSG_APPROVED_ADMIN, MSG_DENIED_PLAYER,
             MSG_DENIED_ADMIN, MSG_EXPIRED, MSG_NO_PENDING, MSG_NONE_AVAILABLE, MSG_SELF_APPROVAL,
-            MSG_BACKEND_DOWN, MSG_GRANT_FAILED, MSG_ERROR, MSG_RELOADED, MSG_NO_CLIENT;
+            MSG_BACKEND_DOWN, MSG_GRANT_FAILED, MSG_ERROR, MSG_RELOADED, MSG_NO_CLIENT, MSG_PERMISSION_EXPIRING,
+            MSG_PERMISSION_LOST;
 
     static {
         section("permissionRegistry", "permissionRegistry");
@@ -178,6 +182,10 @@ public class Config {
         MSG_RELOADED = msg("reloaded", "&aReloaded {max} permission entries.");
         MSG_NO_CLIENT = msg("noClient",
                 "&cThe Clover menu needs the Clover mod on your client. Use &f/rqperm&c (staff) or &f/acperm&c (admins) instead.");
+        MSG_PERMISSION_EXPIRING = msg("permissionExpiring",
+                "&eYour temporary permission &f{permission} &eexpires in about &f{time}&e.");
+        MSG_PERMISSION_LOST = msg("permissionLost",
+                "&cYou lost the temporary permission &f{permission}&c.");
         B.pop();
     }
 

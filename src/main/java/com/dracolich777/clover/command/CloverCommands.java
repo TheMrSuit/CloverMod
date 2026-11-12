@@ -416,6 +416,16 @@ public final class CloverCommands {
           )
       )
       .then(
+        Commands.literal("info")
+          .requires(s -> isStaff(s) || isAdmin(s))
+          .executes(c ->
+            Safe.cmd(c, "open permission info", () -> {
+              GuiService.openInfo(c.getSource().getPlayerOrException());
+              return 1;
+            })
+          )
+      )
+      .then(
         Commands.literal("reload")
           .requires(CloverCommands::isAdmin)
           .executes(c -> Safe.cmd(c, "reload", () -> reload(c)))

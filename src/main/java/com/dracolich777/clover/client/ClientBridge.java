@@ -14,6 +14,9 @@ public final class ClientBridge {
     if (p.mode() == SyncPayload.MODE_ADMIN) {
       if (cur instanceof AdminScreen s) s.update(p);
       else if (p.open()) mc.setScreen(new AdminScreen(p));
+    } else if (p.mode() == SyncPayload.MODE_INFO) {
+      if (cur instanceof PermissionInfoScreen s) s.update(p);
+      else if (p.open()) mc.setScreen(new PermissionInfoScreen(p));
     } else {
       if (cur instanceof RequestScreen s) s.update(p);
       else if (p.open()) mc.setScreen(new RequestScreen(p));

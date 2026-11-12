@@ -1,6 +1,8 @@
 package com.dracolich777.clover.gui;
 
 import com.dracolich777.clover.Config;
+import com.dracolich777.clover.backend.Backends;
+import com.dracolich777.clover.backend.PermissionBackend;
 import com.dracolich777.clover.catalog.CatalogEntry;
 import com.dracolich777.clover.catalog.CatalogManager;
 import com.dracolich777.clover.clover;
@@ -55,6 +57,14 @@ public final class GuiService {
       return;
     }
     open(p, SyncPayload.MODE_ADMIN);
+  }
+
+  public static void openInfo(ServerPlayer p) {
+    if (!RequestService.isStaff(p) && !RequestService.isAdmin(p)) {
+      p.sendSystemMessage(Text.msg(Config.MSG_NOT_ALLOWED));
+      return;
+    }
+    open(p, SyncPayload.MODE_INFO);
   }
 
   private static void open(ServerPlayer p, byte mode) {
@@ -133,7 +143,14 @@ public final class GuiService {
   public static void tick(MinecraftServer server) {
     if (viewers.isEmpty() || ++ticks % 5 != 0) return;
     int v = RequestManager.get().version();
-    if (v == lastVersion) return;
+    boolean refreshInfo = false;
+    for (Viewer viewer : viewers.values()) {
+      if (viewer.mode() == SyncPayload.MODE_INFO) {
+        refreshInfo = true;
+        break;
+      }
+    }
+    if (v == lastVersion && !refreshInfo) return;
     lastVersion = v;
     Iterator<Map.Entry<UUID, Viewer>> it = viewers.entrySet().iterator();
     while (it.hasNext()) {
@@ -181,7 +198,7 @@ public final class GuiService {
           )
         );
       }
-    } else if (RequestService.isAdmin(p)) {
+    } else if (v.mode() == SyncPayload.MODE_ADMIN && RequestService.isAdmin(p)) {
       long now = System.currentTimeMillis();
       for (PermissionRequest r : rm.all()) {
         if (pending.size() >= SyncPayload.MAX_PENDING) break;
@@ -198,7 +215,17 @@ public final class GuiService {
       }
       total = pending.size();
     }
-    return new SyncPayload(open, v.mode(), entries, pending, total, v.query());
+    List<SyncPayload.TemporaryDto> temporary = new ArrayList<>();
+    if (v.mode() == SyncPayload.MODE_INFO) {
+      PermissionBackend backend = Backends.get();
+      if (backend != null) {
+        for (PermissionBackend.TemporaryPermission permission : backend.temporaryPermissions(p)) {
+          temporary.add(new SyncPayload.TemporaryDto(permission.node(), permission.expiresAtMs()));
+        }
+      }
+      total = temporary.size();
+    }
+    return new SyncPayload(open, v.mode(), entries, pending, temporary, total, v.query());
   }
 
   private static String cut(String s, int n) {

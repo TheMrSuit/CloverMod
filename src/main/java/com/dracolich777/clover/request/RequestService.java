@@ -13,6 +13,9 @@ import com.dracolich777.clover.util.Text;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.UUID;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -22,6 +25,8 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 
 public final class RequestService {
+  private static final Map<UUID, Map<String, Long>> expiryWarnings = new HashMap<>();
+  private static final Map<UUID, Map<String, Long>> knownTemporaryPermissions = new HashMap<>();
 
   private RequestService() {}
 
@@ -342,15 +347,77 @@ public final class RequestService {
 
   public static void sweep(MinecraftServer server) {
     RequestManager rm = RequestManager.get();
-    if (rm.isEmpty()) return;
-    long cutoff =
-      System.currentTimeMillis() - Config.REQUEST_TIMEOUT_SECONDS.get() * 1000L;
-    for (PermissionRequest r : rm.expire(cutoff)) {
-      ServerPlayer p = server.getPlayerList().getPlayer(r.player());
-      if (p != null) p.sendSystemMessage(
-        Text.msg(Config.MSG_EXPIRED, kv(r, "", ""))
-      );
-      Discord.notifyOutcome(r, "expired", "", "");
+    if (!rm.isEmpty()) {
+      long cutoff =
+        System.currentTimeMillis() - Config.REQUEST_TIMEOUT_SECONDS.get() * 1000L;
+      for (PermissionRequest r : rm.expire(cutoff)) {
+        ServerPlayer p = server.getPlayerList().getPlayer(r.player());
+        if (p != null) p.sendSystemMessage(
+          Text.msg(Config.MSG_EXPIRED, kv(r, "", ""))
+        );
+        Discord.notifyOutcome(r, "expired", "", "");
+      }
     }
+    warnAboutExpiringPermissions(server);
+  }
+
+  private static void warnAboutExpiringPermissions(MinecraftServer server) {
+    int warningSeconds = Config.PERMISSION_EXPIRY_WARNING_SECONDS.get();
+    if (warningSeconds <= 0) {
+      expiryWarnings.clear();
+    }
+    PermissionBackend backend = Backends.get();
+    if (backend == null) return;
+    long now = System.currentTimeMillis();
+    long warningMs = warningSeconds * 1000L;
+    for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+      Map<String, Long> warned = expiryWarnings.computeIfAbsent(
+        player.getUUID(), ignored -> new HashMap<>()
+      );
+      Map<String, Long> current = new HashMap<>();
+      for (PermissionBackend.TemporaryPermission permission : backend.temporaryPermissions(player)) {
+        current.put(permission.node(), permission.expiresAtMs());
+      }
+      Map<String, Long> known = knownTemporaryPermissions.computeIfAbsent(
+        player.getUUID(), ignored -> new HashMap<>()
+      );
+      for (String node : known.keySet()) {
+        if (!current.containsKey(node)) {
+          player.sendSystemMessage(Text.msg(
+            Config.MSG_PERMISSION_LOST,
+            "permission", node
+          ));
+          warned.remove(node);
+        }
+      }
+      known.clear();
+      known.putAll(current);
+      for (Map.Entry<String, Long> entry : current.entrySet()) {
+        String node = entry.getKey();
+        long expiry = entry.getValue();
+        long remaining = expiry - now;
+        if (remaining > 0 && remaining <= warningMs &&
+            !Long.valueOf(expiry).equals(warned.get(node))) {
+          warned.put(node, expiry);
+          player.sendSystemMessage(Text.msg(
+            Config.MSG_PERMISSION_EXPIRING,
+            "permission", node,
+            "time", Durations.format(Duration.ofMillis(remaining))
+          ));
+        }
+      }
+      warned.entrySet().removeIf(entry -> entry.getValue() <= now);
+    }
+    Iterator<UUID> ids = expiryWarnings.keySet().iterator();
+    while (ids.hasNext()) {
+      UUID id = ids.next();
+      if (server.getPlayerList().getPlayer(id) == null) {
+        ids.remove();
+        knownTemporaryPermissions.remove(id);
+      }
+    }
+    knownTemporaryPermissions.keySet().removeIf(
+      id -> server.getPlayerList().getPlayer(id) == null
+    );
   }
 }

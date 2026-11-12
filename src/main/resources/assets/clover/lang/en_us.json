@@ -20,6 +20,7 @@
   "clover.configuration.allowSelfApproval.tooltip": "Let an admin approve their own request. Turn on for solo testing only.",
   "clover.configuration.cancelOnLogout": "Cancel Requests on Logout",
   "clover.configuration.notifyAdmins": "Notify Online Admins in Chat",
+  "clover.configuration.permissionExpiryWarningSeconds": "Permission Expiry Warning (seconds)",
   "clover.configuration.luckPermsRetryAttempts": "LuckPerms Retry Attempts",
   "clover.configuration.luckPermsRetryDelayMs": "LuckPerms Retry Delay (ms)",
   "clover.configuration.mockFailureChance": "Mock Failure Chance",

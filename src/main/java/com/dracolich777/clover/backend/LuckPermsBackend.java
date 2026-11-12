@@ -4,6 +4,8 @@ import java.time.Duration;
 import java.util.Collection;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.dracolich777.clover.Config;
 
@@ -51,6 +53,26 @@ public final class LuckPermsBackend implements PermissionBackend {
                 ? TemporaryNodeMergeStrategy.ADD_NEW_DURATION_TO_EXISTING
                 : TemporaryNodeMergeStrategy.REPLACE_EXISTING_IF_DURATION_LONGER;
         return lp.getUserManager().modifyUser(uuid, user -> user.data().add(node, strategy));
+    }
+
+    @Override
+    public List<TemporaryPermission> temporaryPermissions(ServerPlayer player) {
+        List<TemporaryPermission> out = new ArrayList<>();
+        try {
+            for (Node node : adapter.getUser(player).getNodes()) {
+                if (!node.getValue()) continue;
+                Duration duration = node.getExpiryDuration();
+                if (duration != null) {
+                    long expiry = node.getExpiry().toEpochMilli();
+                    if (expiry > System.currentTimeMillis()) {
+                        out.add(new TemporaryPermission(node.getKey(), expiry));
+                    }
+                }
+            }
+        } catch (IllegalStateException notLoaded) {
+        }
+        out.sort(java.util.Comparator.comparing(TemporaryPermission::node));
+        return out;
     }
 
     @Override
